@@ -30,7 +30,7 @@ export default function DashboardPage() {
         try {
             const { data, error } = await supabase
                 .from('polls')
-                .select('*')
+                .select('*, id, title, description, created_at, is_active, visibility, auth_type')
                 .order('created_at', { ascending: false })
 
             if (error) throw error
@@ -138,10 +138,16 @@ export default function DashboardPage() {
                                             <p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-2">{poll.description}</p>
                                         </div>
                                         <span className={`px-3 py-1 rounded-full text-xs font-medium ${poll.is_active
-                                                ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400'
-                                                : 'bg-gray-100 dark:bg-gray-900/30 text-gray-600 dark:text-gray-400'
+                                            ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400'
+                                            : 'bg-gray-100 dark:bg-gray-900/30 text-gray-600 dark:text-gray-400'
                                             }`}>
                                             {poll.is_active ? 'Aktif' : 'Selesai'}
+                                        </span>
+                                        <span className={`ml-2 px-3 py-1 rounded-full text-xs font-medium ${poll.visibility === 'public'
+                                            ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
+                                            : 'bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400'
+                                            }`}>
+                                            {poll.visibility === 'public' ? 'Public' : 'Shared Link'}
                                         </span>
                                     </div>
                                     <div className="flex items-center text-sm text-gray-500 dark:text-gray-400">

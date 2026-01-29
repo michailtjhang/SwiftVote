@@ -10,6 +10,7 @@ export default function CreatePollPage() {
     const [title, setTitle] = useState('')
     const [description, setDescription] = useState('')
     const [options, setOptions] = useState(['', ''])
+    const [visibility, setVisibility] = useState<'public' | 'shared'>('public')
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState('')
 
@@ -62,6 +63,8 @@ export default function CreatePollPage() {
                     description: description.trim(),
                     created_by: user.id,
                     is_active: true,
+                    visibility: visibility,
+                    auth_type: visibility === 'public' ? 'account' : 'ip'
                 })
                 .select()
                 .single()
@@ -80,7 +83,7 @@ export default function CreatePollPage() {
 
             if (optionsError) throw optionsError
 
-            router.push(`/polls/${pollData.id}`)
+            router.push(`/polls/${pollData.id}?new=true`)
         } catch (err: any) {
             setError(err.message || 'Gagal membuat polling')
         } finally {
@@ -186,6 +189,54 @@ export default function CreatePollPage() {
                                     + Tambah Opsi
                                 </button>
                             )}
+                        </div>
+
+
+
+                        {/* Visibility Selection */}
+                        <div className="mb-8">
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-4">
+                                Tipe Polling *
+                            </label>
+                            <div className="grid md:grid-cols-2 gap-4">
+                                <div
+                                    onClick={() => setVisibility('public')}
+                                    className={`cursor-pointer p-4 rounded-xl border-2 transition-all ${visibility === 'public'
+                                        ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30'
+                                        : 'border-gray-200 dark:border-gray-700 hover:border-indigo-300'
+                                        }`}
+                                >
+                                    <div className="flex items-center gap-3 mb-2">
+                                        <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${visibility === 'public' ? 'border-indigo-500' : 'border-gray-400'
+                                            }`}>
+                                            {visibility === 'public' && <div className="w-2.5 h-2.5 rounded-full bg-indigo-500" />}
+                                        </div>
+                                        <span className="font-bold text-gray-800 dark:text-white">Public (Login)</span>
+                                    </div>
+                                    <p className="text-sm text-gray-600 dark:text-gray-400 ml-8">
+                                        Muncul di halaman utama. Voter harus login (1 Akun = 1 Suara).
+                                    </p>
+                                </div>
+
+                                <div
+                                    onClick={() => setVisibility('shared')}
+                                    className={`cursor-pointer p-4 rounded-xl border-2 transition-all ${visibility === 'shared'
+                                        ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30'
+                                        : 'border-gray-200 dark:border-gray-700 hover:border-indigo-300'
+                                        }`}
+                                >
+                                    <div className="flex items-center gap-3 mb-2">
+                                        <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${visibility === 'shared' ? 'border-indigo-500' : 'border-gray-400'
+                                            }`}>
+                                            {visibility === 'shared' && <div className="w-2.5 h-2.5 rounded-full bg-indigo-500" />}
+                                        </div>
+                                        <span className="font-bold text-gray-800 dark:text-white">Shared Link (IP)</span>
+                                    </div>
+                                    <p className="text-sm text-gray-600 dark:text-gray-400 ml-8">
+                                        Hanya via link. Tanpa login (1 IP Address = 1 Suara).
+                                    </p>
+                                </div>
+                            </div>
                         </div>
 
                         {/* Submit Button */}

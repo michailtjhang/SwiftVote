@@ -13,6 +13,8 @@ export type Poll = {
     created_at: string
     ends_at: string | null
     is_active: boolean
+    visibility: 'public' | 'shared'
+    auth_type: 'account' | 'ip'
 }
 
 export type PollOption = {
@@ -26,6 +28,7 @@ export type Vote = {
     id: string
     poll_id: string
     option_id: string
-    user_id: string
+    user_id: string | null
+    ip_address: string | null
     created_at: string
 }

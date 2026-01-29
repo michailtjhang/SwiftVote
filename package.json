@@ -11,10 +11,12 @@
   "dependencies": {
     "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.39.3",
+    "@types/request-ip": "^0.0.41",
     "next": "15.1.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "recharts": "^2.12.0"
+    "recharts": "^2.12.0",
+    "request-ip": "^3.3.0"
   },
   "devDependencies": {
     "@types/node": "^20",

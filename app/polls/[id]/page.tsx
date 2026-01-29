@@ -2,46 +2,56 @@
 
 import { useEffect, useState, use } from 'react'
 import { supabase } from '@/lib/supabase'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from 'recharts'
 import type { Poll, PollOption, Vote } from '@/lib/supabase'
+import { castVote, getUserVoteStatus } from '@/app/actions/vote'
 
 const COLORS = ['#6366f1', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#3b82f6', '#ef4444', '#14b8a6']
 
 export default function PollDetailPage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = use(params)
     const router = useRouter()
+    const searchParams = useSearchParams()
+
     const [poll, setPoll] = useState<Poll | null>(null)
     const [options, setOptions] = useState<PollOption[]>([])
     const [votes, setVotes] = useState<Vote[]>([])
     const [userVote, setUserVote] = useState<Vote | null>(null)
-    const [user, setUser] = useState<any>(null)
     const [loading, setLoading] = useState(true)
     const [voting, setVoting] = useState(false)
+    const [showShareModal, setShowShareModal] = useState(false)
+    const [copied, setCopied] = useState(false)
 
     useEffect(() => {
-        checkUser()
-        fetchPollData()
-        subscribeToRealtime()
+        initializePage()
+
+        // Subscription for real-time updates
+        const channel = supabase
+            .channel('votes')
+            .on(
+                'postgres_changes',
+                {
+                    event: 'INSERT',
+                    schema: 'public',
+                    table: 'votes',
+                    filter: `poll_id=eq.${id}`,
+                },
+                (payload) => {
+                    setVotes(prev => [...prev, payload.new as Vote])
+                }
+            )
+            .subscribe()
 
         return () => {
-            supabase.channel('votes').unsubscribe()
+            supabase.removeChannel(channel)
         }
     }, [id])
 
-    const checkUser = async () => {
-        const { data: { user } } = await supabase.auth.getUser()
-        if (!user) {
-            router.push('/auth/login')
-        } else {
-            setUser(user)
-        }
-    }
-
-    const fetchPollData = async () => {
+    const initializePage = async () => {
         try {
-            // Fetch poll
+            // 1. Fetch Poll
             const { data: pollData, error: pollError } = await supabase
                 .from('polls')
                 .select('*')
@@ -51,77 +61,85 @@ export default function PollDetailPage({ params }: { params: Promise<{ id: strin
             if (pollError) throw pollError
             setPoll(pollData)
 
-            // Fetch options
-            const { data: optionsData, error: optionsError } = await supabase
+            // Check for new creation redirect
+            if (searchParams.get('new') === 'true' && pollData.visibility === 'shared') {
+                setShowShareModal(true)
+            }
+
+            // 2. Auth Check based on Poll Type
+            if (pollData.auth_type === 'account') {
+                const { data: { user } } = await supabase.auth.getUser()
+                if (!user) {
+                    router.push(`/auth/login?next=/polls/${id}`)
+                    return // Stop execution
+                }
+            }
+
+            // 3. Fetch Options
+            const { data: optionsData } = await supabase
                 .from('poll_options')
                 .select('*')
                 .eq('poll_id', id)
-
-            if (optionsError) throw optionsError
             setOptions(optionsData || [])
 
-            // Fetch votes
-            const { data: votesData, error: votesError } = await supabase
+            // 4. Fetch All Votes (for chart)
+            const { data: votesData } = await supabase
                 .from('votes')
                 .select('*')
                 .eq('poll_id', id)
-
-            if (votesError) throw votesError
             setVotes(votesData || [])
 
-            // Check user vote
-            const { data: { user } } = await supabase.auth.getUser()
-            if (user) {
-                const userVoteData = votesData?.find(v => v.user_id === user.id)
-                setUserVote(userVoteData || null)
+            // 5. Check if Current User/IP has voted (Server Action)
+            const status = await getUserVoteStatus(id)
+            if (status.hasVoted && status.vote) {
+                // Manually cast to match client type (created_at might be Date vs string)
+                setUserVote(status.vote as unknown as Vote)
             }
+
         } catch (error) {
-            console.error('Error fetching poll data:', error)
+            console.error('Error initializing poll:', error)
         } finally {
             setLoading(false)
         }
     }
 
-    const subscribeToRealtime = () => {
-        const channel = supabase
-            .channel('votes')
-            .on(
-                'postgres_changes',
-                {
-                    event: '*',
-                    schema: 'public',
-                    table: 'votes',
-                    filter: `poll_id=eq.${id}`,
-                },
-                (payload) => {
-                    if (payload.eventType === 'INSERT') {
-                        setVotes(prev => [...prev, payload.new as Vote])
-                    }
-                }
-            )
-            .subscribe()
+    const handleShare = () => {
+        const url = window.location.href.split('?')[0] // Remove query params
+        navigator.clipboard.writeText(url)
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
     }
 
     const handleVote = async (optionId: string) => {
-        if (!user || userVote || voting) return
+        if (userVote || voting) return
+        if (poll?.is_active === false) return
 
         setVoting(true)
         try {
-            const { error } = await supabase
+            const result = await castVote(id, optionId)
+
+            if (result?.error) {
+                alert(result.error)
+                return
+            }
+
+            // Success
+            // Fetch status again to get the vote object
+            const status = await getUserVoteStatus(id)
+            if (status.hasVoted && status.vote) {
+                setUserVote(status.vote as unknown as Vote)
+            }
+
+            // Refresh votes list
+            const { data: votesData } = await supabase
                 .from('votes')
-                .insert({
-                    poll_id: id,
-                    option_id: optionId,
-                    user_id: user.id,
-                })
+                .select('*')
+                .eq('poll_id', id)
+            if (votesData) setVotes(votesData)
 
-            if (error) throw error
-
-            // Refresh data
-            await fetchPollData()
         } catch (error: any) {
             console.error('Error voting:', error)
-            alert('Gagal memberikan vote: ' + error.message)
+            alert('Gagal memberikan vote.')
         } finally {
             setVoting(false)
         }
@@ -173,18 +191,83 @@ export default function PollDetailPage({ params }: { params: Promise<{ id: strin
     }
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50 dark:from-gray-900 dark:via-purple-900 dark:to-indigo-900">
+        <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50 dark:from-gray-900 dark:via-purple-900 dark:to-indigo-900 relative">
             {/* Header */}
             <header className="bg-white/50 dark:bg-gray-800/50 backdrop-blur-md border-b border-gray-200 dark:border-gray-700">
-                <div className="container mx-auto px-4 py-4">
-                    <Link href="/dashboard" className="flex items-center gap-2 w-fit">
+                <div className="container mx-auto px-4 py-4 flex justify-between items-center">
+                    <Link href="/dashboard" className="flex items-center gap-2 w-fit hover:opacity-75 transition-opacity">
                         <svg className="w-5 h-5 text-gray-600 dark:text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
                         </svg>
                         <span className="text-gray-600 dark:text-gray-300">Kembali ke Dashboard</span>
                     </Link>
+
+                    <button
+                        onClick={() => setShowShareModal(true)}
+                        className="flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 font-medium hover:bg-indigo-200 dark:hover:bg-indigo-900/50 transition-all"
+                    >
+                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                        </svg>
+                        Share Poll
+                    </button>
                 </div>
             </header>
+
+            {/* Share Modal */}
+            {showShareModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
+                    <div className="bg-white dark:bg-gray-800 rounded-2xl p-8 max-w-md w-full shadow-2xl transform scale-100 transition-all">
+                        <div className="text-center mb-6">
+                            <div className="w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+                                <svg className="w-8 h-8 text-green-600 dark:text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                </svg>
+                            </div>
+                            <h3 className="text-2xl font-bold text-gray-800 dark:text-white mb-2">Polling Siap!</h3>
+                            <p className="text-gray-600 dark:text-gray-300">
+                                Polling berhasil dibuat. Bagikan link ini ke teman-temanmu untuk mulai voting.
+                            </p>
+                        </div>
+
+                        <div className="bg-gray-50 dark:bg-gray-900 p-4 rounded-xl border border-gray-200 dark:border-gray-700 mb-6">
+                            <p className="text-xs text-gray-500 mb-1 font-medium uppercase tracking-wider">Link Polling</p>
+                            <div className="flex items-center gap-2 break-all text-sm font-mono text-gray-600 dark:text-gray-400">
+                                {window.location.href.split('?')[0]}
+                            </div>
+                        </div>
+
+                        <div className="flex gap-3">
+                            <button
+                                onClick={handleShare}
+                                className="flex-1 px-6 py-3 rounded-xl bg-indigo-600 text-white font-bold hover:bg-indigo-700 transition-all flex items-center justify-center gap-2"
+                            >
+                                {copied ? (
+                                    <>
+                                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                        </svg>
+                                        Tersalin!
+                                    </>
+                                ) : (
+                                    <>
+                                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                                        </svg>
+                                        Salin Link
+                                    </>
+                                )}
+                            </button>
+                            <button
+                                onClick={() => setShowShareModal(false)}
+                                className="px-6 py-3 rounded-xl border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 font-bold hover:bg-gray-50 dark:hover:bg-gray-800 transition-all"
+                            >
+                                Tutup
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Main Content */}
             <main className="container mx-auto px-4 py-8">
@@ -198,12 +281,20 @@ export default function PollDetailPage({ params }: { params: Promise<{ id: strin
                                     <p className="text-gray-600 dark:text-gray-300">{poll.description}</p>
                                 )}
                             </div>
-                            <span className={`ml-4 px-4 py-2 rounded-full text-sm font-medium ${poll.is_active
-                                ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400'
-                                : 'bg-gray-100 dark:bg-gray-900/30 text-gray-600 dark:text-gray-400'
-                                }`}>
-                                {poll.is_active ? '🟢 Aktif' : '⚫ Selesai'}
-                            </span>
+                            <div className="flex flex-col items-end gap-2">
+                                <span className={`px-4 py-2 rounded-full text-sm font-medium ${poll.is_active
+                                    ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400'
+                                    : 'bg-gray-100 dark:bg-gray-900/30 text-gray-600 dark:text-gray-400'
+                                    }`}>
+                                    {poll.is_active ? '🟢 Aktif' : '⚫ Selesai'}
+                                </span>
+                                <span className={`px-3 py-1 rounded-full text-xs font-medium ${poll.visibility === 'public'
+                                    ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
+                                    : 'bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400'
+                                    }`}>
+                                    {poll.visibility === 'public' ? 'Public' : 'Shared Link'}
+                                </span>
+                            </div>
                         </div>
 
                         <div className="flex items-center gap-6 text-sm text-gray-500 dark:text-gray-400">
@@ -230,7 +321,7 @@ export default function PollDetailPage({ params }: { params: Promise<{ id: strin
                         {/* Voting Section */}
                         <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-lg rounded-2xl p-8 shadow-xl">
                             <h2 className="text-2xl font-bold text-gray-800 dark:text-white mb-6">
-                                {userVote ? 'Hasil Voting' : 'Pilih Opsi Kamu'}
+                                {userVote ? 'Hasil Voting' : (poll.auth_type === 'ip' ? 'Vote via IP (Tanpa Login)' : 'Pilih Opsi Kamu')}
                             </h2>
 
                             {userVote && (

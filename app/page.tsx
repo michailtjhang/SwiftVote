@@ -1,10 +1,28 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
+import { supabase } from '@/lib/supabase'
+import type { Poll } from '@/lib/supabase'
 
 export default function HomePage() {
     const [isDark, setIsDark] = useState(true)
+    const [publicPolls, setPublicPolls] = useState<Poll[]>([])
+
+    useEffect(() => {
+        fetchPublicPolls()
+    }, [])
+
+    const fetchPublicPolls = async () => {
+        const { data } = await supabase
+            .from('polls')
+            .select('*')
+            .eq('visibility', 'public')
+            .order('created_at', { ascending: false })
+            .limit(6)
+
+        if (data) setPublicPolls(data)
+    }
 
     return (
         <div className={isDark ? 'dark' : ''}>
@@ -138,6 +156,42 @@ export default function HomePage() {
                             </div>
                         </div>
                     </div>
+
+
+                    {/* Public Polls Section */}
+                    {publicPolls.length > 0 && (
+                        <div className="mt-32 max-w-6xl mx-auto">
+                            <h2 className="text-3xl font-bold text-center mb-12 text-gray-800 dark:text-white">
+                                Polling <span className="gradient-text">Terbuka</span> Terbaru
+                            </h2>
+                            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                {publicPolls.map((poll) => (
+                                    <Link
+                                        key={poll.id}
+                                        href={`/polls/${poll.id}`}
+                                        className="group p-6 rounded-2xl bg-white/70 dark:bg-gray-800/70 backdrop-blur-lg border border-gray-200 dark:border-gray-700 hover:shadow-xl hover:scale-105 transition-all"
+                                    >
+                                        <div className="flex justify-between items-start mb-4">
+                                            <div className="flex-1">
+                                                <h3 className="text-xl font-bold text-gray-800 dark:text-white mb-2 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
+                                                    {poll.title}
+                                                </h3>
+                                                <p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-2">{poll.description}</p>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center text-sm text-gray-500 dark:text-gray-400">
+                                            <span className="px-3 py-1 rounded-full text-xs font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
+                                                Public
+                                            </span>
+                                            <span className="ml-auto">
+                                                {new Date(poll.created_at).toLocaleDateString()}
+                                            </span>
+                                        </div>
+                                    </Link>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                 </main>
 
                 {/* Footer */}
@@ -146,7 +200,7 @@ export default function HomePage() {
                         <p>&copy; 2024 SwiftVote. Powered by Next.js & Supabase.</p>
                     </div>
                 </footer>
-            </div>
-        </div>
+            </div >
+        </div >
     )
 }
