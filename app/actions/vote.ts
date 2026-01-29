@@ -40,10 +40,12 @@ async function createSupabaseServerClient() {
 export async function castVote(pollId: string, optionId: string) {
     const supabase = await createSupabaseServerClient()
 
-    // 1. Get Poll Info to determine Auth Type
-    const { data: poll } = await supabase.from('polls').select('auth_type').eq('id', pollId).single()
+    // 1. Get Poll Info to determine Auth Type & Expiry
+    const { data: poll } = await supabase.from('polls').select('auth_type, ends_at, is_active').eq('id', pollId).single()
 
     if (!poll) return { error: 'Poll not found' }
+    if (!poll.is_active) return { error: 'Poll is closed' }
+    if (poll.ends_at && new Date() > new Date(poll.ends_at)) return { error: 'Poll has ended' }
 
     // 2. Handle Account Based Voting
     if (poll.auth_type === 'account') {

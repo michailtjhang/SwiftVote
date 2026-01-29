@@ -13,6 +13,7 @@ export default function CreatePollPage() {
     const [visibility, setVisibility] = useState<'public' | 'shared'>('public')
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState('')
+    const [duration, setDuration] = useState('24_hours')
 
     const addOption = () => {
         if (options.length < 10) {
@@ -55,6 +56,16 @@ export default function CreatePollPage() {
             const { data: { user } } = await supabase.auth.getUser()
             if (!user) throw new Error('User not authenticated')
 
+            // Calculate ends_at
+            let endsAt = null
+            if (duration !== 'forever') {
+                const now = new Date()
+                if (duration === '1_hour') now.setHours(now.getHours() + 1)
+                if (duration === '24_hours') now.setDate(now.getDate() + 1)
+                if (duration === '7_days') now.setDate(now.getDate() + 7)
+                endsAt = now.toISOString()
+            }
+
             // Create poll
             const { data: pollData, error: pollError } = await supabase
                 .from('polls')
@@ -64,7 +75,8 @@ export default function CreatePollPage() {
                     created_by: user.id,
                     is_active: true,
                     visibility: visibility,
-                    auth_type: visibility === 'public' ? 'account' : 'ip'
+                    auth_type: visibility === 'public' ? 'account' : 'ip',
+                    ends_at: endsAt
                 })
                 .select()
                 .single()
@@ -192,6 +204,23 @@ export default function CreatePollPage() {
                         </div>
 
 
+
+                        {/* Duration Selection */}
+                        <div className="mb-6">
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                Durasi Polling
+                            </label>
+                            <select
+                                value={duration}
+                                onChange={(e) => setDuration(e.target.value)}
+                                className="w-full px-4 py-3 rounded-xl bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-800 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all appearance-none"
+                            >
+                                <option value="1_hour">1 Jam</option>
+                                <option value="24_hours">24 Jam (1 Hari)</option>
+                                <option value="7_days">7 Hari (1 Minggu)</option>
+                                <option value="forever">Selamanya (Tidak ada batas)</option>
+                            </select>
+                        </div>
 
                         {/* Visibility Selection */}
                         <div className="mb-8">
